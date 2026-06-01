@@ -96,7 +96,7 @@ int main() {
         // accept
         struct sockaddr_in client_addr = {};
         socklen_t addr_len = sizeof(client_addr); // defines both input and output socket length, need to match IP version
-        int client_fd = accept(fd, (struct sockaddr *)&client_addr, &addr_len);
+        int client_fd = accept(fd, (struct sockaddr *)&client_addr, &addr_len); // accept() is treated as a read() call
 
         if (client_fd < 0) {
             continue; // error
