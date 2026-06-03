@@ -24,21 +24,6 @@ struct Conn {
     std::vector<uint8_t> data_out;
 };
 
-// static void do_stuff(int client_fd) {
-//     char rbuf[64] = {};
-//     ssize_t n_recv = read(client_fd, rbuf, sizeof(rbuf) - 1); // -1 for null-terminator
-//     if (n_recv < 0) {
-//         perror("read() error");
-//         return;
-//     }
-
-//     printf("client wrote: %s\n", rbuf);
-
-//     char wbuf[] = "world";
-//     write(client_fd, wbuf, sizeof(wbuf));
-// }
-
-
 // What to do?
 // Read protocol header first (4 bytes) => can we read?
 // try to read body => can we read?
@@ -67,7 +52,7 @@ static bool try_one_request(Conn *conn) {
 
     // try to read out all the data
     const uint8_t *request_payload = &conn->data_in[4];
-    
+
     {
     char msg[len + 1]; // add just for printing purposes, not efficient lul
     memcpy(msg, request_payload, len);
