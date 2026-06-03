@@ -33,3 +33,10 @@ int write_all(int fd, char *buf, size_t n) {
 
     return 0;
 }
+
+void buf_append(std::vector<uint8_t> &vec, const uint8_t *data, size_t len) {
+    vec.insert(vec.end(), data, data + len); // adds using pointers to start and end of data
+}
+void buf_consume(std::vector<uint8_t> &vec, size_t n) {
+    vec.erase(vec.begin(), vec.begin() + n); // erase beginning till n of vector using iterator
+} // consume n from the start
