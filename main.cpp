@@ -53,12 +53,13 @@ static bool try_one_request(Conn *conn) {
     // try to read out all the data
     const uint8_t *request_payload = &conn->data_in[4];
 
-    {
-    char msg[len + 1]; // add just for printing purposes, not efficient lul
-    memcpy(msg, request_payload, len);
-    msg[len] = '\0';
-    printf("Client sent: %s\n", msg);
-    }
+    // NOTE: i think this was breaking the client due to wanting to print 3*10^6 characters
+    // {
+    // char msg[len + 1]; // add just for printing purposes, not efficient lul
+    // memcpy(msg, request_payload, len);
+    // msg[len] = '\0';
+    // printf("Client sent: %s\n", msg);
+    // }
 
     // (const uint8_t *)&len Reinterprets pointer to len as uint8_t so that when pointer arithmetic is done, we are incrementing by 1 byte instead of 4!
     buf_append(conn->data_out, (const uint8_t *)&len, 4);
@@ -95,36 +96,16 @@ static Conn* handle_accept(int fd) {
     return conn;
 }
 
-static void handle_read(Conn *conn) {
-    // NOTE: uint8_t is pretty much char
-    uint8_t buf[64 * 1024];
-
-    ssize_t rv = read(conn->fd, buf, sizeof(buf)); // rv is number of bytes received
-
-    // we only handle_read when fd is ready to read so if we read nothing or errored, we just close socket connection
-    if (rv <= 0) {
-        conn->want_close = true;
-        return;
-    }
-
-    // Append buffer to data_in buffer of connection
-    buf_append(conn->data_in, buf, (size_t) rv);
-    
-    // try to do a request
-    try_one_request(conn); // this will ever only append to data_out on successful protocol parsing
-
-    // switch to write iff we have data to write, because we will only ever be in read or write mode
-    if (conn->data_out.size() > 0) {
-        conn->want_read = false;
-        conn->want_write = true;
-    }
-}
-
 static void handle_write(Conn *conn) {
     // make sure data_out is non 0
     assert(conn->data_out.size() > 0);
     // write syscall
     ssize_t rv = write(conn->fd, conn->data_out.data(), conn->data_out.size());
+
+    // handle case of full kernel buffer for pipelined requests
+    if (rv < 0 && errno == EAGAIN) {
+        return; // client socket is not ready to write to
+    }
 
     if (rv < 0) { // write errored out
         conn->want_close = true;
@@ -137,6 +118,35 @@ static void handle_write(Conn *conn) {
     if (conn->data_out.size() == 0) {
         conn->want_read = true;
         conn->want_write = false;
+    }
+}
+
+static void handle_read(Conn *conn) {
+    // NOTE: uint8_t is pretty much char
+    uint8_t buf[64 * 1024];
+
+    // NOTE: this can receive much more than just one requests worth of data
+    // we can batch process, if there is enough data
+    ssize_t rv = read(conn->fd, buf, sizeof(buf)); // rv is number of bytes received
+
+    // we only handle_read when fd is ready to read so if we read nothing or errored, we just close socket connection
+    if (rv <= 0) {
+        conn->want_close = true;
+        return;
+    }
+
+    // Append buffer to data_in buffer of connection
+    buf_append(conn->data_in, buf, (size_t) rv);
+    
+    // Optimization: pipelined request handling => try to process until one fails
+    while (try_one_request(conn)) {} // this will ever only append to data_out on successful protocol parsing
+
+    // switch to write iff we have data to write, because we will only ever be in read or write mode
+    if (conn->data_out.size() > 0) {
+        conn->want_read = false;
+        conn->want_write = true;
+
+        handle_write(conn); // Optimization: optimisitic non-blocking write
     }
 }
 

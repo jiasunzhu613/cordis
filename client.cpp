@@ -4,40 +4,94 @@
 #include <cstdio>
 #include <cstring>
 #include <unistd.h>
+#include <string>
+#include <errno.h>
 
 #include "utils.hpp"
 
-static int send_one_request(int fd, const char *text) {
-    int text_len = strlen(text);
-    if (text_len > MAX_MSG_SIZE) {
+// static int send_one_request(int fd, const char *text, size_t text_len) {
+//     printf("hello entered");
+//     if (text_len > MAX_MSG_SIZE) {
+//         return -1;
+//     }
+
+//     char wbuf[4 + MAX_MSG_SIZE] = {};
+//     memcpy(wbuf, &text_len, 4);
+//     memcpy(&wbuf[4], text, text_len);
+
+//     // write to socket
+//     write_all(fd, wbuf, 4 + text_len);
+
+//     // Read from server
+//     char rbuf[4 + MAX_MSG_SIZE] = {};
+//     int err = read_all(fd, rbuf, 4);
+//     if (err) {
+//         perror("read() error");
+//         return err;
+//     }
+
+//     int msg_len;
+//     memcpy(&msg_len, rbuf, 4);
+
+//     err = read_all(fd, &rbuf[4], msg_len);
+//     if (err) {
+//         perror("read() content error");
+//         return err;
+//     }
+
+//     // printf("Server wrote: %s\n", &rbuf[4]);
+//     return 0;
+// }
+
+static int send_req(int fd, const uint8_t *data, size_t len) {
+    if (len > MAX_MSG_SIZE) {
         return -1;
     }
 
-    char wbuf[4 + MAX_MSG_SIZE] = {};
-    memcpy(wbuf, &text_len, 4);
-    memcpy(&wbuf[4], text, text_len);
+    std::vector<uint8_t> buf;
+    // WTF is this doing?
+    buf_append(buf, (const uint8_t *)&len, 4);
+    buf_append(buf, data, len);
 
-    // write to socket
-    write_all(fd, wbuf, 4 + text_len);
+    return write_all(fd, (char *)buf.data(), buf.size());
+}
 
-    // Read from server
-    char rbuf[4 + MAX_MSG_SIZE] = {};
-    int err = read_all(fd, rbuf, 4);
+static int read_res(int fd) {
+    std::vector<uint8_t> rbuf;
+    rbuf.resize(4); // resize to 4 byte sized to read one integer
+
+    // read length header first
+    errno = 0;
+    int err = read_all(fd, (char*)&rbuf[0], 4);
     if (err) {
-        perror("read() error");
+        if (errno == 0) {
+            perror("EOF");
+        } else {
+            perror("read() failed at reading header");
+        }
+
         return err;
     }
 
-    int msg_len;
-    memcpy(&msg_len, rbuf, 4);
+    // copy bytes into len
+    uint32_t len;
+    memcpy(&len, rbuf.data(), 4); // REMEMBER: this is a c api so we need to use .data() to get underlying array from vector
+    
+    // check if len header is too long!
+    if (len > MAX_MSG_SIZE) {
+        return -1;
+    }
 
-    err = read_all(fd, &rbuf[4], msg_len);
+    rbuf.resize(4 + len);
+    // start reading actual body returned
+    err = read_all(fd, (char*)&rbuf[4], len);
     if (err) {
-        perror("read() content error");
+        perror("read() error at reading payload");
         return err;
     }
 
-    printf("Server wrote: %s\n", &rbuf[4]);
+    // We limit the amount of chars we print
+    printf("Server sent: length=%u, data=%.*s\n", len, len < 100 ? len : 100, &rbuf[4]);
     return 0;
 }
 
@@ -70,18 +124,32 @@ int main() {
     //     return 1;
     // }
 
-    // printf("Server wrote: %s\n", rbuf);
-    const char msg1[] = "redis says hello";
-    int err = send_one_request(fd, msg1);
-    if (err) {
-        close(fd);
-        return 0;
+    // printf("Server wrote: %s\n", rbuf)
+    std::vector<std::string> payloads = {
+        "a", "b", 
+        std::string(MAX_MSG_SIZE, 'z'), 
+        "hello3"
+    };
+
+    // Likely will pipeline the requests as the server will likely read some number of data together
+    // Send all requests to pipeline
+    for (const std::string& s : payloads) {
+        int err = send_req(fd, (uint8_t*)s.data(), s.size());
+        if (err) {
+            close(fd);
+            return 1;
+        }
     }
 
-    const char msg2[] = "redis says yoo";
-    err = send_one_request(fd, msg2);
-    if (err) {
-        close(fd);
-        return 0;
+    // NOTE: .size() returns size_t!!!
+    // later read!
+    for (size_t i = 0; i < payloads.size(); i++) {
+        int err = read_res(fd);
+        if (err) {
+            close(fd);
+            return 1;
+        }
     }
+
+    return 0;
 }

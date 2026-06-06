@@ -7,7 +7,7 @@
 #include <assert.h>
 #include <vector>
 
-#define MAX_MSG_SIZE 4096
+const int MAX_MSG_SIZE = 32 << 20;
 
 // TODO: support void *
 int read_all(int fd, char *buf, size_t n);
