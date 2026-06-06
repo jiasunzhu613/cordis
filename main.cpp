@@ -20,8 +20,8 @@ struct Conn {
     bool want_close;
 
     // Data buffers
-    std::vector<uint8_t> data_in;
-    std::vector<uint8_t> data_out;
+    Buffer *data_in;
+    Buffer *data_out;
 };
 
 // What to do?
@@ -30,12 +30,12 @@ struct Conn {
 // write result to data_out
 static bool try_one_request(Conn *conn) {
     // check data_in size first
-    if (conn->data_in.size() < 4) {
+    if (conn->data_in->size() < 4) {
         return false; // immediately fail trying to process one request, need to read more
     }
 
     uint32_t len;
-    memcpy(&len, conn->data_in.data(), 4); // directly copy 4 bytes into len
+    memcpy(&len, conn->data_in->data(), 4); // directly copy 4 bytes into len
 
     // ===== IMPORTANT!!! ======
     // Check length of payload sent to ensure that it adheres to the protocol
@@ -46,20 +46,12 @@ static bool try_one_request(Conn *conn) {
 
     // Try to read full payload
     // Perform length check first 
-    if (4 + len > conn->data_in.size()) {
+    if (4 + len > conn->data_in->size()) {
         return false;
     }
 
     // try to read out all the data
-    const uint8_t *request_payload = &conn->data_in[4];
-
-    // NOTE: i think this was breaking the client due to wanting to print 3*10^6 characters
-    // {
-    // char msg[len + 1]; // add just for printing purposes, not efficient lul
-    // memcpy(msg, request_payload, len);
-    // msg[len] = '\0';
-    // printf("Client sent: %s\n", msg);
-    // }
+    const uint8_t *request_payload = &conn->data_in->data()[4];
 
     // (const uint8_t *)&len Reinterprets pointer to len as uint8_t so that when pointer arithmetic is done, we are incrementing by 1 byte instead of 4!
     buf_append(conn->data_out, (const uint8_t *)&len, 4);
@@ -92,15 +84,17 @@ static Conn* handle_accept(int fd) {
     Conn *conn = new Conn(); // idiomatic C++ pointer instantiatio
     conn->fd = client_fd;
     conn->want_read = true;
+    conn->data_in = new Buffer();
+    conn->data_out = new Buffer();
 
     return conn;
 }
 
 static void handle_write(Conn *conn) {
     // make sure data_out is non 0
-    assert(conn->data_out.size() > 0);
+    assert(conn->data_out->size() > 0);
     // write syscall
-    ssize_t rv = write(conn->fd, conn->data_out.data(), conn->data_out.size());
+    ssize_t rv = write(conn->fd, conn->data_out->data(), conn->data_out->size());
 
     // handle case of full kernel buffer for pipelined requests
     if (rv < 0 && errno == EAGAIN) {
@@ -115,7 +109,7 @@ static void handle_write(Conn *conn) {
     buf_consume(conn->data_out, (size_t)rv); // consume rv sized buffer from the front
 
     // switch to read if we have written all data
-    if (conn->data_out.size() == 0) {
+    if (conn->data_out->size() == 0) {
         conn->want_read = true;
         conn->want_write = false;
     }
@@ -142,7 +136,7 @@ static void handle_read(Conn *conn) {
     while (try_one_request(conn)) {} // this will ever only append to data_out on successful protocol parsing
 
     // switch to write iff we have data to write, because we will only ever be in read or write mode
-    if (conn->data_out.size() > 0) {
+    if (conn->data_out->size() > 0) {
         conn->want_read = false;
         conn->want_write = true;
 
@@ -256,6 +250,8 @@ int main() {
             if ((ready & POLLERR) || conn->want_close) {
                 close(conn->fd);
                 fd_to_conn[conn->fd] = NULL; // set index to NULL
+                delete conn->data_in;
+                delete conn->data_out;
                 delete conn; // free pointer
             }
         }

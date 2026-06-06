@@ -34,9 +34,25 @@ int write_all(int fd, char *buf, size_t n) {
     return 0;
 }
 
-void buf_append(std::vector<uint8_t> &vec, const uint8_t *data, size_t len) {
-    vec.insert(vec.end(), data, data + len); // adds using pointers to start and end of data
+void buf_append(struct Buffer *buf, const uint8_t *data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        // not enough space, need reallocation
+        if (buf->data_end > buf->buffer_end) {
+            buf->realloc();
+        }
+
+        // iteratively append values onto underlying uint8_t array buffer
+        *(buf->data_end++) = data[i];
+    }
 }
-void buf_consume(std::vector<uint8_t> &vec, size_t n) {
-    vec.erase(vec.begin(), vec.begin() + n); // erase beginning till n of vector using iterator
+
+void buf_consume(struct Buffer *buf, size_t n) {
+    // Shift data pointer backwards
+    // First check if n is too big
+    size_t data_len = buf->data_end - buf->data_begin;
+    if (n > data_len) {
+        n = data_len;
+    }
+
+    buf->data_begin += n;
 } // consume n from the start

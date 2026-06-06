@@ -9,39 +9,12 @@
 
 #include "utils.hpp"
 
-// static int send_one_request(int fd, const char *text, size_t text_len) {
-//     printf("hello entered");
-//     if (text_len > MAX_MSG_SIZE) {
-//         return -1;
-//     }
-
-//     char wbuf[4 + MAX_MSG_SIZE] = {};
-//     memcpy(wbuf, &text_len, 4);
-//     memcpy(&wbuf[4], text, text_len);
-
-//     // write to socket
-//     write_all(fd, wbuf, 4 + text_len);
-
-//     // Read from server
-//     char rbuf[4 + MAX_MSG_SIZE] = {};
-//     int err = read_all(fd, rbuf, 4);
-//     if (err) {
-//         perror("read() error");
-//         return err;
-//     }
-
-//     int msg_len;
-//     memcpy(&msg_len, rbuf, 4);
-
-//     err = read_all(fd, &rbuf[4], msg_len);
-//     if (err) {
-//         perror("read() content error");
-//         return err;
-//     }
-
-//     // printf("Server wrote: %s\n", &rbuf[4]);
-//     return 0;
-// }
+void vec_buf_append(std::vector<uint8_t> &vec, const uint8_t *data, size_t len) {
+    vec.insert(vec.end(), data, data + len); // adds using pointers to start and end of data
+}
+void vec_buf_consume(std::vector<uint8_t> &vec, size_t n) {
+    vec.erase(vec.begin(), vec.begin() + n); // erase beginning till n of vector using iterator
+} // consume n from the start
 
 static int send_req(int fd, const uint8_t *data, size_t len) {
     if (len > MAX_MSG_SIZE) {
@@ -50,8 +23,8 @@ static int send_req(int fd, const uint8_t *data, size_t len) {
 
     std::vector<uint8_t> buf;
     // WTF is this doing?
-    buf_append(buf, (const uint8_t *)&len, 4);
-    buf_append(buf, data, len);
+    vec_buf_append(buf, (const uint8_t *)&len, 4);
+    vec_buf_append(buf, data, len);
 
     return write_all(fd, (char *)buf.data(), buf.size());
 }
