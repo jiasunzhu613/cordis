@@ -16,15 +16,25 @@ void vec_buf_consume(std::vector<uint8_t> &vec, size_t n) {
     vec.erase(vec.begin(), vec.begin() + n); // erase beginning till n of vector using iterator
 } // consume n from the start
 
-static int send_req(int fd, const uint8_t *data, size_t len) {
+static int send_req(int fd, std::vector<std::string> data, size_t len) {
+    size_t total_payload_size = (len + 1) * 4;
+    for (std::string &s : data) {
+        total_payload_size += s.length();
+    }
+
     if (len > MAX_MSG_SIZE) {
         return -1;
     }
-
+    
     std::vector<uint8_t> buf;
-    // WTF is this doing?
+    vec_buf_append(buf, (const uint8_t *)&total_payload_size, 4); // payload len
     vec_buf_append(buf, (const uint8_t *)&len, 4);
-    vec_buf_append(buf, data, len);
+
+    for (std::string &s : data) {
+        size_t str_len = s.length();
+        vec_buf_append(buf, (const uint8_t *)&str_len, 4);
+        vec_buf_append(buf, (const uint8_t *)s.c_str(), str_len);
+    }
 
     return write_all(fd, (char *)buf.data(), buf.size());
 }
@@ -55,16 +65,27 @@ static int read_res(int fd) {
         return -1;
     }
 
-    rbuf.resize(4 + len);
-    // start reading actual body returned
-    err = read_all(fd, (char*)&rbuf[4], len);
+    // start reading status
+    rbuf.resize(4 + 4);
+    err = read_all(fd, (char*)&rbuf[4], 4);
     if (err) {
-        perror("read() error at reading payload");
+        perror("read() error at reading status");
+        return err;
+    }
+
+    uint32_t status;
+    memcpy(&status, &rbuf[4], 4);
+
+    // start reating actual response data
+    rbuf.resize(4 + 4 + len);
+    err = read_all(fd, (char*)&rbuf[8], len - 4);
+    if (err) {
+        perror("read() error at reading data");
         return err;
     }
 
     // We limit the amount of chars we print
-    printf("Server sent: length=%u, data=%.*s\n", len, len < 100 ? len : 100, &rbuf[4]);
+    printf("Server sent: status=%u, data=%.*s\n", status, len < 100 ? len : 100, &rbuf[8]);
     return 0;
 }
 
@@ -99,29 +120,39 @@ int main() {
 
     // printf("Server wrote: %s\n", rbuf)
     std::vector<std::string> payloads = {
-        "a", "b", 
-        std::string(MAX_MSG_SIZE, 'z'), 
-        "hello3"
+        "set", "a", "hello world"
+        // std::string(MAX_MSG_SIZE, 'z'), 
+        // "hello3"
+    };
+
+    std::vector<std::string> payloads2 = {
+        "get", "a"
+        // std::string(MAX_MSG_SIZE, 'z'), 
+        // "hello3"
     };
 
     // Likely will pipeline the requests as the server will likely read some number of data together
     // Send all requests to pipeline
-    for (const std::string& s : payloads) {
-        int err = send_req(fd, (uint8_t*)s.data(), s.size());
-        if (err) {
-            close(fd);
-            return 1;
-        }
+    int err = send_req(fd, payloads, payloads.size());
+    if (err) {
+        close(fd);
+        return 1;
+    }
+    int err2 = read_res(fd);
+    if (err2) {
+        close(fd);
+        return 1;
     }
 
-    // NOTE: .size() returns size_t!!!
-    // later read!
-    for (size_t i = 0; i < payloads.size(); i++) {
-        int err = read_res(fd);
-        if (err) {
-            close(fd);
-            return 1;
-        }
+    err = send_req(fd, payloads2, payloads2.size());
+    if (err) {
+        close(fd);
+        return 1;
+    }
+    err2 = read_res(fd);
+    if (err2) {
+        close(fd);
+        return 1;
     }
 
     return 0;

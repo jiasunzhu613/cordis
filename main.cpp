@@ -8,8 +8,13 @@
 #include <cerrno>
 #include <vector>
 #include <fcntl.h>
+#include <map>
 
 #include "utils.hpp"
+
+#define RESP_SUCCESS 0
+#define RESP_ERR 1
+#define RESP_NOT_FOUND 2
 
 struct Conn {
     int fd;
@@ -24,6 +29,113 @@ struct Conn {
     Buffer *data_out;
 };
 
+struct Response {
+    uint32_t status = 0;
+    std::vector<uint8_t> data;
+};
+
+static std::map<std::string, std::string> global_map;
+
+// curr_payload is a pointer to a location in the payload
+// const uint8_t *&curr_payload is a reference to a pointer, essentially serves the same purpose as pointer to a pointer
+static int read_uint32(const uint8_t *&curr_payload, const uint8_t *end, uint32_t &target) {
+    if (curr_payload + 4 > end) {
+        return -1;
+    }
+
+    // actuall read into target now
+    memcpy(&target, curr_payload, 4);
+    curr_payload += 4;
+    return 0; 
+}
+
+static int read_str(const uint8_t *&curr_payload, uint32_t len, const uint8_t *end, std::string &target) {
+    if (curr_payload + len > end) {
+        return -1;
+    }
+
+    // actuall read into target now
+    target.assign(curr_payload, curr_payload + len);
+    curr_payload += len;
+    return 0; 
+}
+
+// Pass payload and size for defensize programming in case user sent non matching payload size and actual payload size
+static int parse_request(const uint8_t *payload, size_t size, std::vector<std::string> &cmd) {
+    const uint8_t *end = payload + size;
+
+    // read nstr part
+    uint32_t nstr; // copy first 4 bytes of payload
+    if (read_uint32(payload, end, nstr) < 0) {
+        return -1;
+    }
+
+    printf("got nstr: %u\n", nstr);
+
+    // Expecting to iterate nstr times
+    for (uint32_t i = 0; i < nstr; i++) {
+        // read len of string then push back onto cmd vector
+        uint32_t len;
+        if (read_uint32(payload, end, len) < 0) {
+            return -1;
+        }
+
+        printf("got len: %u\n", len);
+
+        // read string into cmd
+        cmd.push_back(std::string());
+        if (read_str(payload, len, end, cmd.back()) < 0) {
+            return -1;
+        }
+
+        printf("got str: %s\n", cmd.back().c_str());
+    }
+
+    if (payload != end) { // some how length header was bigger than payload provided
+        return -1;
+    }
+
+    return 0;
+}
+
+// support get, set, del for now
+static void do_request(std::vector<std::string> &cmd, Response &resp) {
+    // first match first cmd
+    if (cmd.size() == 2 && cmd[0] == "get") {
+        // NOTE: [] subscript syntax creates a new entry in the map, we use .find to check for existence
+        auto it = global_map.find(cmd[1]);
+        if (it == global_map.end()) {
+            resp.status = RESP_NOT_FOUND;
+            return;
+        }
+
+        // Access value at the second position
+        const std::string &s = it->second;
+        // assign value to resp data
+        resp.data.assign(s.begin(), s.end());
+    } else if (cmd.size() == 3 && cmd[0] == "set") {
+        global_map[cmd[1]].swap(cmd[2]); // swap content with cmd[2]
+    } else if (cmd.size() == 2 && cmd[0] == "del") {
+        global_map.erase(cmd[1]);
+    } else {
+        resp.status = RESP_ERR;
+        return;
+    }
+
+    return;
+}
+
+static void make_response(Conn *conn, Response &resp) {
+    // get total response payload size
+    size_t resp_size = 4 + resp.data.size();
+    buf_append(conn->data_out, (const uint8_t *)&resp_size, 4);
+    buf_append(conn->data_out, (const uint8_t *)&resp.status, 4);
+    buf_append(conn->data_out, resp.data.data(), resp.data.size());
+
+    return;
+}
+
+// TODO: support new protocol of message payload => nstr | len | msg1 | len | msg2 | ...
 // What to do?
 // Read protocol header first (4 bytes) => can we read?
 // try to read body => can we read?
@@ -50,12 +162,22 @@ static bool try_one_request(Conn *conn) {
         return false;
     }
 
+    // TODO: replace this whole section
     // try to read out all the data
     const uint8_t *request_payload = &conn->data_in->data()[4];
 
-    // (const uint8_t *)&len Reinterprets pointer to len as uint8_t so that when pointer arithmetic is done, we are incrementing by 1 byte instead of 4!
-    buf_append(conn->data_out, (const uint8_t *)&len, 4);
-    buf_append(conn->data_out, request_payload, len);
+    std::vector<std::string> cmd;
+    if (parse_request(request_payload, len, cmd) < 0) {
+        return false;
+    }
+
+    for (std::string &s : cmd) {
+        printf("got string: %s\n", s.c_str());
+    }
+
+    Response resp;
+    do_request(cmd, resp);
+    make_response(conn, resp);
 
     // consume existing buffer data_in
     buf_consume(conn->data_in, 4 + len);
@@ -81,7 +203,7 @@ static Conn* handle_accept(int fd) {
 
     fd_set_nb(client_fd); // set new fd to nonblocking mode
 
-    Conn *conn = new Conn(); // idiomatic C++ pointer instantiatio
+    Conn *conn = new Conn(); // idiomatic C++ pointer instantiation
     conn->fd = client_fd;
     conn->want_read = true;
     conn->data_in = new Buffer();

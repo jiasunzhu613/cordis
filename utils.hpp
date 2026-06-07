@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <assert.h>
 #include <vector>
+#include <string>
+#include <iostream>
+
 
 const int MAX_MSG_SIZE = 32 << 20;
 
