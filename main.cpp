@@ -11,10 +11,18 @@
 #include <map>
 
 #include "utils.hpp"
+#include "hashtable.hpp"
 
 #define RESP_SUCCESS 0
 #define RESP_ERR 1
 #define RESP_NOT_FOUND 2
+
+// offsetof is a C macro that finds the offset of a member in accordance to a struct in bytes
+//    NOTE: the linux version of the container_of macro uses gcc macro extensions to do a member check 
+// NOTE: we cast to char* because we want to make byte sized moves to the pointer mem address
+// After we cast back to the struct type to allow for proper dereferencing/loading of bytes
+#define container_of(ptr, T, member) \
+    ((T *)( (char *)ptr - offsetof(T, member) ))
 
 struct Conn {
     int fd;
@@ -34,7 +42,99 @@ struct Response {
     std::vector<uint8_t> data;
 };
 
+struct Entry {
+    HashNode node;
+    std::string key;
+    std::string value;
+};
+
 static std::map<std::string, std::string> global_map;
+// Global hash table
+static HashMap global_hmap = HashMap{};
+
+// FNV hash
+static uint64_t str_hash(const uint8_t *data, size_t len) {
+    uint32_t h = 0x811C9DC5;
+    for (size_t i = 0; i < len; i++) {
+        h = (h + data[i]) * 0x01000193;
+    }
+    return h;
+}
+
+static bool entry_eq(HashNode *lhs, HashNode *rhs) {
+    struct Entry *le = container_of(lhs, struct Entry, node);
+    struct Entry *re = container_of(rhs, struct Entry, node);
+    printf("cur key %s, node key %s\n", le->key.c_str(), re->key.c_str());
+    return le->key == re->key;
+}
+
+// custom get, set, del hashtable operations
+// Get based on key
+static void hmap_do_get(HashMap *hmap, std::vector<std::string> &cmd, Response &resp) {
+    Entry entry;
+    entry.key.swap(cmd[1]);
+    entry.node.hash = str_hash((uint8_t*)entry.key.data(), entry.key.length());
+    printf("get got hash: %ld\n", entry.node.hash);
+
+    // Now use hash and the hmap to do a lookup for the 
+    HashNode *node = hm_lookup(hmap, &entry.node, &entry_eq);
+    printf("get got node: %p\n", node);
+    if (!node) {
+        resp.status = RESP_NOT_FOUND;
+        return;
+    }
+
+    Entry *act_entry = container_of(node, struct Entry, node);
+    std::string val = act_entry->value;
+
+    // make sure message is not too long
+    assert(val.length() <= MAX_MSG_SIZE);
+    resp.data.assign(val.begin(), val.end());
+}
+
+// Set key-value pair
+// Here we create new instance
+static void hmap_do_set(HashMap *hmap, std::vector<std::string> &cmd, Response &) {
+    Entry entry;
+    entry.key.swap(cmd[1]);
+    entry.node.hash = str_hash((uint8_t*)entry.key.data(), entry.key.length());
+    printf("set stored based on hash: %ld\n", entry.node.hash);
+
+    // Now use hash and the hmap to do a lookup for the 
+    HashNode *lookup_node = hm_lookup(hmap, &entry.node, &entry_eq);
+
+    // If key is not in hashtable, add it to the hashtable
+    if (!lookup_node) {
+        Entry *new_entry = new Entry();
+        new_entry->key.swap(entry.key);
+        new_entry->value.swap(cmd[2]);
+        new_entry->node.hash = entry.node.hash;
+
+        // insert the new node into the hash table
+        hm_insert(hmap, &new_entry->node);
+    } else { // otherwise, it is, so simply change the value
+        // Find the container that the hashnode belongs to
+        Entry *entry_container = container_of(lookup_node, struct Entry, node);
+        entry_container->value.swap(cmd[2]); // change value to new value
+    }
+}
+
+// Del key from hashmap
+static void hmap_do_del(HashMap *hmap, std::vector<std::string> &cmd, Response &resp) {
+    Entry entry;
+    entry.key.swap(cmd[1]);
+    entry.node.hash = str_hash((uint8_t*)entry.key.data(), entry.key.length());
+    printf("del got based on hash: %ld\n", entry.node.hash);
+
+    // Now use hash and the hmap to do a lookup for the 
+    HashNode *node_to_be_deleted = hm_delete(hmap, &entry.node, &entry_eq);
+
+    // If key is not in list, err
+    if (node_to_be_deleted) {
+        // Delete the container that stores the HashNode
+        delete container_of(node_to_be_deleted, struct Entry, node);
+    }
+}
 
 // curr_payload is a pointer to a location in the payload
 // const uint8_t *&curr_payload is a reference to a pointer, essentially serves the same purpose as pointer to a pointer
@@ -103,20 +203,11 @@ static void do_request(std::vector<std::string> &cmd, Response &resp) {
     // first match first cmd
     if (cmd.size() == 2 && cmd[0] == "get") {
         // NOTE: [] subscript syntax creates a new entry in the map, we use .find to check for existence
-        auto it = global_map.find(cmd[1]);
-        if (it == global_map.end()) {
-            resp.status = RESP_NOT_FOUND;
-            return;
-        }
-
-        // Access value at the second position
-        const std::string &s = it->second;
-        // assign value to resp data
-        resp.data.assign(s.begin(), s.end());
+        hmap_do_get(&global_hmap, cmd, resp);
     } else if (cmd.size() == 3 && cmd[0] == "set") {
-        global_map[cmd[1]].swap(cmd[2]); // swap content with cmd[2]
+        hmap_do_set(&global_hmap, cmd, resp);
     } else if (cmd.size() == 2 && cmd[0] == "del") {
-        global_map.erase(cmd[1]);
+        hmap_do_del(&global_hmap, cmd, resp);
     } else {
         resp.status = RESP_ERR;
         return;
