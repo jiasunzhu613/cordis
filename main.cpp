@@ -42,19 +42,12 @@ struct Conn {
     Buffer *data_out;
 };
 
-// TODO: remove
-struct Response {
-    uint32_t status = 0;
-    std::vector<uint8_t> data;
-};
-
 struct Entry {
     HashNode node;
     std::string key;
     std::string value;
 };
 
-static std::map<std::string, std::string> global_map;
 // Global hash table
 static HashMap global_hmap = HashMap{};
 
@@ -144,32 +137,6 @@ static void hmap_do_del(HashMap *hmap, std::vector<std::string> &cmd, Buffer *bu
     // If key is not in list, err
     emit_simple_error(buf, (uint8_t*)SIMPLE_ERROR_BAD, 3);
 }
-
-// TODO: remove?
-// TODO: move this into utils
-// curr_payload is a pointer to a location in the payload
-// const uint8_t *&curr_payload is a reference to a pointer, essentially serves the same purpose as pointer to a pointer
-// static int read_uint32(const uint8_t *&curr_payload, const uint8_t *end, uint32_t &target) {
-//     if (curr_payload + 4 > end) {
-//         return -1;
-//     }
-
-//     // actuall read into target now
-//     memcpy(&target, curr_payload, 4);
-//     curr_payload += 4;
-//     return 0; 
-// }
-
-// static int read_str(const uint8_t *&curr_payload, uint32_t len, const uint8_t *end, std::string &target) {
-//     if (curr_payload + len > end) {
-//         return -1;
-//     }
-
-//     // actuall read into target now
-//     target.assign(curr_payload, curr_payload + len);
-//     curr_payload += len;
-//     return 0; 
-// }
 
 // Pass payload and size for defensize programming in case user sent non matching payload size and actual payload size
 // TODO: convert backt o const uint8_t *payload for best practice? to expose the least amount of data possible
