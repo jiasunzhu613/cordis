@@ -9,83 +9,37 @@
 
 #include "utils.hpp"
 
-void vec_buf_append(std::vector<uint8_t> &vec, const uint8_t *data, size_t len) {
-    vec.insert(vec.end(), data, data + len); // adds using pointers to start and end of data
-}
-void vec_buf_consume(std::vector<uint8_t> &vec, size_t n) {
-    vec.erase(vec.begin(), vec.begin() + n); // erase beginning till n of vector using iterator
-} // consume n from the start
-
+// send request in array bulk string format
 static int send_req(int fd, std::vector<std::string> data, size_t len) {
-    size_t total_payload_size = (len + 1) * 4;
+    Buffer buf;
+
+    emit_array(&buf, len);
     for (std::string &s : data) {
-        total_payload_size += s.length();
+        emit_bulk_string(&buf, (uint8_t*)s.data(), s.length());
     }
 
-    if (len > MAX_MSG_SIZE) {
-        return -1;
-    }
-    
-    std::vector<uint8_t> buf;
-    vec_buf_append(buf, (const uint8_t *)&total_payload_size, 4); // payload len
-    vec_buf_append(buf, (const uint8_t *)&len, 4);
-
-    for (std::string &s : data) {
-        size_t str_len = s.length();
-        vec_buf_append(buf, (const uint8_t *)&str_len, 4);
-        vec_buf_append(buf, (const uint8_t *)s.c_str(), str_len);
-    }
-
+    printf("\nSent request\n");
     return write_all(fd, (char *)buf.data(), buf.size());
 }
 
-static int read_res(int fd) {
-    std::vector<uint8_t> rbuf;
-    rbuf.resize(4); // resize to 4 byte sized to read one integer
+// TODO: read all into rbuf then move into Buffer structure
+static int read_data(int fd, Buffer *buf) {
+    uint8_t rbuf[64 * 1024];
 
     // read length header first
     errno = 0;
-    int err = read_all(fd, (char*)&rbuf[0], 4);
-    if (err) {
+    int rv = read(fd, rbuf, sizeof(rbuf));
+    if (rv <= 0) {
         if (errno == 0) {
             perror("EOF");
         } else {
-            perror("read() failed at reading header");
+            perror("read() failed at data");
         }
 
-        return err;
-    }
-
-    // copy bytes into len
-    uint32_t len;
-    memcpy(&len, rbuf.data(), 4); // REMEMBER: this is a c api so we need to use .data() to get underlying array from vector
-    
-    // check if len header is too long!
-    if (len > MAX_MSG_SIZE) {
         return -1;
     }
 
-    // start reading status
-    rbuf.resize(4 + 4);
-    err = read_all(fd, (char*)&rbuf[4], 4);
-    if (err) {
-        perror("read() error at reading status");
-        return err;
-    }
-
-    uint32_t status;
-    memcpy(&status, &rbuf[4], 4);
-
-    // start reating actual response data
-    rbuf.resize(4 + 4 + len);
-    err = read_all(fd, (char*)&rbuf[8], len - 4);
-    if (err) {
-        perror("read() error at reading data");
-        return err;
-    }
-
-    // We limit the amount of chars we print
-    printf("Server sent: status=%u, data=%.*s\n", status, len < 100 ? len : 100, &rbuf[8]);
+    buf_append(buf, rbuf, (size_t)rv);
     return 0;
 }
 
@@ -133,27 +87,42 @@ int main() {
 
     // Likely will pipeline the requests as the server will likely read some number of data together
     // Send all requests to pipeline
+    Buffer buf;
     int err = send_req(fd, payloads, payloads.size());
     if (err) {
         close(fd);
         return 1;
     }
-    int err2 = read_res(fd);
-    if (err2) {
+    int err1 = read_data(fd, &buf);
+    if (err1) {
         close(fd);
         return 1;
     }
+    Cordis_Response response1;
+    int cordis_err = read_one(&buf, &response1);
+    if (cordis_err < 0) {
+        close(fd);
+        return 1;
+    }
+    printf("Tag type: %c, response: %s\n", response1.tag, response1.simple_string.c_str());
 
     err = send_req(fd, payloads2, payloads2.size());
     if (err) {
         close(fd);
         return 1;
     }
-    err2 = read_res(fd);
-    if (err2) {
+    err1 = read_data(fd, &buf);
+    if (err1) {
         close(fd);
         return 1;
     }
+    Cordis_Response response2;
+    cordis_err = read_one(&buf, &response2);
+    if (cordis_err < 0) {
+        close(fd);
+        return 1;
+    }
+    printf("Tag type: %c, response: %s\n", response2.tag, response2.bulk_string.c_str());
 
     return 0;
 }

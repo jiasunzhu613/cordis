@@ -17,6 +17,11 @@
 #define RESP_ERR 1
 #define RESP_NOT_FOUND 2
 
+// TODO: maybe add macros for lengths too
+#define SIMPLE_STRING_OK "OK"
+#define SIMPLE_ERROR_BAD "BAD"
+#define SIMPLE_ERROR_CMD_NOT_FOUND "CMD_NOT_FOUND"
+
 // offsetof is a C macro that finds the offset of a member in accordance to a struct in bytes
 //    NOTE: the linux version of the container_of macro uses gcc macro extensions to do a member check 
 // NOTE: we cast to char* because we want to make byte sized moves to the pointer mem address
@@ -37,6 +42,7 @@ struct Conn {
     Buffer *data_out;
 };
 
+// TODO: remove
 struct Response {
     uint32_t status = 0;
     std::vector<uint8_t> data;
@@ -53,10 +59,11 @@ static std::map<std::string, std::string> global_map;
 static HashMap global_hmap = HashMap{};
 
 // FNV hash
+// hash = (hash XOR byte) * prime, hash starts as a prime (?)
 static uint64_t str_hash(const uint8_t *data, size_t len) {
     uint32_t h = 0x811C9DC5;
     for (size_t i = 0; i < len; i++) {
-        h = (h + data[i]) * 0x01000193;
+        h = (h ^ data[i]) * 0x01000193;
     }
     return h;
 }
@@ -64,23 +71,20 @@ static uint64_t str_hash(const uint8_t *data, size_t len) {
 static bool entry_eq(HashNode *lhs, HashNode *rhs) {
     struct Entry *le = container_of(lhs, struct Entry, node);
     struct Entry *re = container_of(rhs, struct Entry, node);
-    printf("cur key %s, node key %s\n", le->key.c_str(), re->key.c_str());
     return le->key == re->key;
 }
 
 // custom get, set, del hashtable operations
 // Get based on key
-static void hmap_do_get(HashMap *hmap, std::vector<std::string> &cmd, Response &resp) {
+static void hmap_do_get(HashMap *hmap, std::vector<std::string> &cmd, Buffer *buf) {
     Entry entry;
     entry.key.swap(cmd[1]);
     entry.node.hash = str_hash((uint8_t*)entry.key.data(), entry.key.length());
-    printf("get got hash: %ld\n", entry.node.hash);
 
     // Now use hash and the hmap to do a lookup for the 
     HashNode *node = hm_lookup(hmap, &entry.node, &entry_eq);
-    printf("get got node: %p\n", node);
     if (!node) {
-        resp.status = RESP_NOT_FOUND;
+        emit_simple_error(buf, (uint8_t*)SIMPLE_ERROR_BAD, 3);
         return;
     }
 
@@ -89,16 +93,16 @@ static void hmap_do_get(HashMap *hmap, std::vector<std::string> &cmd, Response &
 
     // make sure message is not too long
     assert(val.length() <= MAX_MSG_SIZE);
-    resp.data.assign(val.begin(), val.end());
+    emit_bulk_string(buf, (uint8_t*)val.data(), val.length());
 }
 
 // Set key-value pair
 // Here we create new instance
-static void hmap_do_set(HashMap *hmap, std::vector<std::string> &cmd, Response &) {
+// Response, respond with OK if success, else with error type
+static void hmap_do_set(HashMap *hmap, std::vector<std::string> &cmd, Buffer *buf) {
     Entry entry;
     entry.key.swap(cmd[1]);
     entry.node.hash = str_hash((uint8_t*)entry.key.data(), entry.key.length());
-    printf("set stored based on hash: %ld\n", entry.node.hash);
 
     // Now use hash and the hmap to do a lookup for the 
     HashNode *lookup_node = hm_lookup(hmap, &entry.node, &entry_eq);
@@ -117,111 +121,113 @@ static void hmap_do_set(HashMap *hmap, std::vector<std::string> &cmd, Response &
         Entry *entry_container = container_of(lookup_node, struct Entry, node);
         entry_container->value.swap(cmd[2]); // change value to new value
     }
+
+    emit_simple_string(buf, (uint8_t*)SIMPLE_STRING_OK, 2);
 }
 
 // Del key from hashmap
-static void hmap_do_del(HashMap *hmap, std::vector<std::string> &cmd, Response &resp) {
+static void hmap_do_del(HashMap *hmap, std::vector<std::string> &cmd, Buffer *buf) {
     Entry entry;
     entry.key.swap(cmd[1]);
     entry.node.hash = str_hash((uint8_t*)entry.key.data(), entry.key.length());
-    printf("del got based on hash: %ld\n", entry.node.hash);
 
     // Now use hash and the hmap to do a lookup for the 
     HashNode *node_to_be_deleted = hm_delete(hmap, &entry.node, &entry_eq);
 
-    // If key is not in list, err
     if (node_to_be_deleted) {
         // Delete the container that stores the HashNode
         delete container_of(node_to_be_deleted, struct Entry, node);
+        emit_simple_string(buf, (uint8_t*)SIMPLE_STRING_OK, 2);
+        return;
     }
+
+    // If key is not in list, err
+    emit_simple_error(buf, (uint8_t*)SIMPLE_ERROR_BAD, 3);
 }
 
+// TODO: remove?
+// TODO: move this into utils
 // curr_payload is a pointer to a location in the payload
 // const uint8_t *&curr_payload is a reference to a pointer, essentially serves the same purpose as pointer to a pointer
-static int read_uint32(const uint8_t *&curr_payload, const uint8_t *end, uint32_t &target) {
-    if (curr_payload + 4 > end) {
-        return -1;
-    }
+// static int read_uint32(const uint8_t *&curr_payload, const uint8_t *end, uint32_t &target) {
+//     if (curr_payload + 4 > end) {
+//         return -1;
+//     }
 
-    // actuall read into target now
-    memcpy(&target, curr_payload, 4);
-    curr_payload += 4;
-    return 0; 
-}
+//     // actuall read into target now
+//     memcpy(&target, curr_payload, 4);
+//     curr_payload += 4;
+//     return 0; 
+// }
 
-static int read_str(const uint8_t *&curr_payload, uint32_t len, const uint8_t *end, std::string &target) {
-    if (curr_payload + len > end) {
-        return -1;
-    }
+// static int read_str(const uint8_t *&curr_payload, uint32_t len, const uint8_t *end, std::string &target) {
+//     if (curr_payload + len > end) {
+//         return -1;
+//     }
 
-    // actuall read into target now
-    target.assign(curr_payload, curr_payload + len);
-    curr_payload += len;
-    return 0; 
-}
+//     // actuall read into target now
+//     target.assign(curr_payload, curr_payload + len);
+//     curr_payload += len;
+//     return 0; 
+// }
 
 // Pass payload and size for defensize programming in case user sent non matching payload size and actual payload size
-static int parse_request(const uint8_t *payload, size_t size, std::vector<std::string> &cmd) {
-    const uint8_t *end = payload + size;
+// TODO: convert backt o const uint8_t *payload for best practice? to expose the least amount of data possible
+static int parse_request(Buffer *buf, std::vector<std::string> &cmd) {
+    // read tag
+    printf("\nTrying to parse request!\n");
+    Tags tag;
+    if (read_tag(buf, tag) < 0 || tag != Tags::TAG_ARRAY) {
+        return -1;
+    }
+    printf("tag value: %c\n", tag);
 
-    // read nstr part
-    uint32_t nstr; // copy first 4 bytes of payload
-    if (read_uint32(payload, end, nstr) < 0) {
+    // Read array length
+    uint32_t nstr;
+    if (read_array_length(buf, nstr) < 0) {
         return -1;
     }
 
-    printf("got nstr: %u\n", nstr);
+    printf("Request parsing got nstr: %u\n", nstr);
 
     // Expecting to iterate nstr times
     for (uint32_t i = 0; i < nstr; i++) {
-        // read len of string then push back onto cmd vector
-        uint32_t len;
-        if (read_uint32(payload, end, len) < 0) {
+        // ensure tag is bulk string, otherwise error
+        Tags bstr_tag;
+        if (read_tag(buf, bstr_tag) < 0 || bstr_tag != Tags::TAG_BULK_STRING) {
             return -1;
         }
 
-        printf("got len: %u\n", len);
-
+        // read len of string then push back onto cmd vector
         // read string into cmd
         cmd.push_back(std::string());
-        if (read_str(payload, len, end, cmd.back()) < 0) {
+        if (read_bulk_string(buf, cmd.back()) < 0) {
             return -1;
         }
-
-        printf("got str: %s\n", cmd.back().c_str());
     }
 
-    if (payload != end) { // some how length header was bigger than payload provided
-        return -1;
-    }
+    // TODO: how to add handle post read verification for RESP2 protocol?
+    // if (payload != end) { // some how length header was bigger than payload provided
+    //     return -1;
+    // }
 
     return 0;
 }
 
 // support get, set, del for now
-static void do_request(std::vector<std::string> &cmd, Response &resp) {
+static void do_request(std::vector<std::string> &cmd, Buffer *buf) {
     // first match first cmd
     if (cmd.size() == 2 && cmd[0] == "get") {
         // NOTE: [] subscript syntax creates a new entry in the map, we use .find to check for existence
-        hmap_do_get(&global_hmap, cmd, resp);
+        hmap_do_get(&global_hmap, cmd, buf);
     } else if (cmd.size() == 3 && cmd[0] == "set") {
-        hmap_do_set(&global_hmap, cmd, resp);
+        hmap_do_set(&global_hmap, cmd, buf);
     } else if (cmd.size() == 2 && cmd[0] == "del") {
-        hmap_do_del(&global_hmap, cmd, resp);
+        hmap_do_del(&global_hmap, cmd, buf);
     } else {
-        resp.status = RESP_ERR;
+        emit_simple_error(buf, (uint8_t*)SIMPLE_ERROR_CMD_NOT_FOUND, 13);
         return;
     }
-
-    return;
-}
-
-static void make_response(Conn *conn, Response &resp) {
-    // get total response payload size
-    size_t resp_size = 4 + resp.data.size();
-    buf_append(conn->data_out, (const uint8_t *)&resp_size, 4);
-    buf_append(conn->data_out, (const uint8_t *)&resp.status, 4);
-    buf_append(conn->data_out, resp.data.data(), resp.data.size());
 
     return;
 }
@@ -232,46 +238,19 @@ static void make_response(Conn *conn, Response &resp) {
 // try to read body => can we read?
 // write result to data_out
 static bool try_one_request(Conn *conn) {
-    // check data_in size first
-    if (conn->data_in->size() < 4) {
-        return false; // immediately fail trying to process one request, need to read more
-    }
-
-    uint32_t len;
-    memcpy(&len, conn->data_in->data(), 4); // directly copy 4 bytes into len
-
-    // ===== IMPORTANT!!! ======
-    // Check length of payload sent to ensure that it adheres to the protocol
-    if (len > MAX_MSG_SIZE) { // protocol level error
-        conn->want_close = true; // close connection
-        return false;
-    }
-
-    // Try to read full payload
-    // Perform length check first 
-    if (4 + len > conn->data_in->size()) {
-        return false;
-    }
-
-    // TODO: replace this whole section
-    // try to read out all the data
-    const uint8_t *request_payload = &conn->data_in->data()[4];
-
     std::vector<std::string> cmd;
-    if (parse_request(request_payload, len, cmd) < 0) {
+    if (parse_request(conn->data_in, cmd) < 0) { // TODO: migrate away from explicitly passing in Buffer*
         return false;
     }
 
     for (std::string &s : cmd) {
-        printf("got string: %s\n", s.c_str());
+        printf("Got string: %s\n", s.c_str());
     }
 
-    Response resp;
-    do_request(cmd, resp);
-    make_response(conn, resp);
+    do_request(cmd, conn->data_out);
 
     // consume existing buffer data_in
-    buf_consume(conn->data_in, 4 + len);
+    // buf_consume(conn->data_in, 4 + len);
 
     return true; // success
 }

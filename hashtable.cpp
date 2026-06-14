@@ -24,7 +24,6 @@ static void htab_init(HashTab *htab, size_t size) {
 
 static void htab_insert(HashTab *htab, HashNode *node) {
     size_t ind = node->hash & htab->mask; // calculate hash % size using bitwise and
-    printf("got here into insert, node: %p, ind: %ld\n", node, ind);
     HashNode *p = htab->tab[ind];
     node->next = p;
     htab->tab[ind] = node;
@@ -38,12 +37,10 @@ static HashNode **htab_lookup(HashTab *htab, HashNode *node, bool (*eq)(HashNode
     }
 
     size_t ind = node->hash & htab->mask; 
-    printf("in htab_lookup, ind: %ld\n", ind);
 
     HashNode **from = &htab->tab[ind]; // pointer to the target
     HashNode *cur;
     while ((cur = *from) != NULL) {
-        printf("cur hash: %ld, node hash: %ld\n", cur->hash, node->hash);
         if (cur->hash == node->hash && eq(cur, node)) {
             return from;
         }
