@@ -9,3 +9,6 @@ client: client.cpp utils.cpp utils.hpp hashtable.cpp hashtable.hpp
 
 buffer_test: buffer_test.cpp utils.cpp utils.hpp hashtable.cpp hashtable.hpp
 	$(CPP) $(CPP_FLAGS) -o buffer_test.out buffer_test.cpp utils.cpp hashtable.cpp
+
+.PHONY: all
+all: main client buffer_test
