@@ -4,7 +4,7 @@
 
 Cordis is a toy Redis implementation that is a RESP2 (Redis Serialization Protocol) compatible. 
 
-### Developer quickstart
+## Developer quickstart
 CMake is used to build Cordis.
 
 In the project root directory:
@@ -16,6 +16,6 @@ CMake should generate executable for both the Cordis client and server under the
 To run server: `./build/src/server/server`
 To run client: `./build/src/client/client`
 
-### Roadmap (in order of priority)
+## Roadmap (in order of priority)
 - [ ] Support all RESP2 types
 - [ ] Support Redis' ZSET commands (sorted set)
