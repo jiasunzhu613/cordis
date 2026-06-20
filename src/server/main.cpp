@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include <map>
 
-#include <utils.hpp>
+#include <common/utils.hpp>
 #include <hashtable.hpp>
 
 #define RESP_SUCCESS 0
