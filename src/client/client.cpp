@@ -7,7 +7,7 @@
 #include <string>
 #include <errno.h>
 
-#include "utils.hpp"
+#include <utils.hpp>
 
 // send request in array bulk string format
 static int send_req(int fd, std::vector<std::string> data, size_t len) {
