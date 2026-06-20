@@ -13,7 +13,9 @@ In the project root directory:
 3. OPTIONALLY run tests: `cd build && ctest`
 
 CMake should generate executable for both the Cordis client and server under the `build/src` directories. 
+
 To run server: `./build/src/server/server`
+
 To run client: `./build/src/client/client`
 
 ## Roadmap (in order of priority)
