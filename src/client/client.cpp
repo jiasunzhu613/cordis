@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <string>
 #include <errno.h>
+#include <sstream>
+#include <set>
+#include <iterator>
 
 #include <common/utils.hpp>
 
@@ -43,6 +46,33 @@ static int read_data(int fd, Buffer *buf) {
     return 0;
 }
 
+void print_cordis_response(Cordis_Response response) {
+    switch(response.tag) {
+    case TAG_NULL: 
+        printf("Tag type: %c, response: %s\n", response.tag, "<null type has no response>");
+        break;
+    case TAG_SIMPLE_STRING:
+        printf("Tag type: %c, response: %s\n", response.tag, response.simple_string.c_str());
+        break;
+    case TAG_SIMPLE_ERROR:
+        printf("Tag type: %c, response: %s\n", response.tag, response.simple_error.c_str());
+        break;
+    case TAG_INT64:
+        printf("Tag type: %c, response: %ld\n", response.tag, response.integer);
+        break;
+    case TAG_BULK_STRING:
+        printf("Tag type: %c, response: %s\n", response.tag, response.bulk_string.c_str());
+        break;
+    case TAG_ARRAY:
+        printf("Tag type: %c\n", response.tag);
+        for (Cordis_Response elem : response.array) {
+            print_cordis_response(elem);
+        }
+        printf("END array Cordis_Response\n");
+        break;
+    }
+}
+
 int main() {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -62,67 +92,52 @@ int main() {
         return 1;
     }
 
-    // char msg[] = "redis says hello";
-    // write(fd, msg, sizeof(msg)); // write message to socket
+    // Supported operations
+    std::set<std::string> operations = {"get", "set", "del", "keys"};
 
-    // char rbuf[64] = {};
-    // int n_recv = read(fd, rbuf, sizeof(rbuf) - 1);
-    // if (n_recv < 0) {
-    //     perror("read() failed");
-    //     return 1;
-    // }
+    // REPL client CLI
+    while (1) {
+        // Read user input, line by line, make sure to match against valid, supported keys
+        std::string line;
+        std::getline(std::cin, line);
+        std::istringstream iss(line);
 
-    // printf("Server wrote: %s\n", rbuf)
-    std::vector<std::string> payloads = {
-        "set", "a", "hello world"
-        // std::string(MAX_MSG_SIZE, 'z'), 
-        // "hello3"
-    };
+        // Stream iterators construct the vector automatically
+        std::vector<std::string> tokens{std::istream_iterator<std::string>{iss},
+                                        std::istream_iterator<std::string>{}};
 
-    std::vector<std::string> payloads2 = {
-        "get"
-        // std::string(MAX_MSG_SIZE, 'z'), 
-        // "hello3"
-    };
+        if (tokens.size() < 1 || tokens[0] == "exit") {
+            break;
+        }
 
-    // Likely will pipeline the requests as the server will likely read some number of data together
-    // Send all requests to pipeline
-    Buffer buf;
-    int err = send_req(fd, payloads, payloads.size());
-    if (err) {
-        close(fd);
-        return 1;
-    }
-    int err1 = read_data(fd, &buf);
-    if (err1) {
-        close(fd);
-        return 1;
-    }
-    Cordis_Response response1;
-    int cordis_err = read_one(&buf, &response1);
-    if (cordis_err < 0) {
-        close(fd);
-        return 1;
-    }
-    printf("Tag type: %c, response: %s\n", response1.tag, response1.simple_string.c_str());
+        if (!operations.count(tokens[0])) {
+            std::cout << "unsupported operation of: " << tokens[0] << std::endl;
+            continue;
+        }
 
-    err = send_req(fd, payloads2, payloads2.size());
-    if (err) {
-        close(fd);
-        return 1;
+        // Process response
+        Buffer buf;
+        int err = send_req(fd, tokens, tokens.size());
+        if (err) {
+            close(fd);
+            return 1;
+        }
+        err = read_data(fd, &buf);
+        if (err) {
+            close(fd);
+            return 1;
+        }
+
+        Cordis_Response response;
+        int cordis_err = read_one(&buf, &response);
+        if (cordis_err < 0) {
+            close(fd);
+            return 1;
+        }
+
+
+        print_cordis_response(response);
     }
-    err1 = read_data(fd, &buf);
-    if (err1) {
-        close(fd);
-        return 1;
-    }
-    Cordis_Response response2;
-    cordis_err = read_one(&buf, &response2);
-    if (cordis_err < 0) {
-        close(fd);
-        return 1;
-    }
-    printf("Tag type: %c, response: %s\n", response2.tag, response2.bulk_string.c_str());
 
     return 0;
 }

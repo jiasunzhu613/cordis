@@ -67,6 +67,16 @@ static bool entry_eq(HashNode *lhs, HashNode *rhs) {
     return le->key == re->key;
 }
 
+static bool callback_keys(HashNode *node, void *arg) {
+    Buffer *out = (Buffer*)arg;
+
+    // Get the container of the node
+    Entry *entry = container_of(node, struct Entry, node);
+    std::string key = entry->key;
+    emit_bulk_string(out, (uint8_t*)key.data(), key.length());
+    return true;
+}
+
 // custom get, set, del hashtable operations
 // Get based on key
 static void hmap_do_get(HashMap *hmap, std::vector<std::string> &cmd, Buffer *buf) {
@@ -138,6 +148,11 @@ static void hmap_do_del(HashMap *hmap, std::vector<std::string> &cmd, Buffer *bu
     emit_simple_error(buf, (uint8_t*)SIMPLE_ERROR_BAD, 3);
 }
 
+static void hmap_do_keys(HashMap *hmap, std::vector<std::string> &, Buffer *buf) {
+    emit_array(buf, hm_size(hmap));
+    hm_foreach(hmap, callback_keys, (void*)buf);
+}
+
 // Pass payload and size for defensize programming in case user sent non matching payload size and actual payload size
 // TODO: convert backt o const uint8_t *payload for best practice? to expose the least amount of data possible
 static int parse_request(Buffer *buf, std::vector<std::string> &cmd) {
@@ -191,6 +206,8 @@ static void do_request(std::vector<std::string> &cmd, Buffer *buf) {
         hmap_do_set(&global_hmap, cmd, buf);
     } else if (cmd.size() == 2 && cmd[0] == "del") {
         hmap_do_del(&global_hmap, cmd, buf);
+    } else if (cmd.size() == 1 && cmd[0] == "keys") {
+        hmap_do_keys(&global_hmap, cmd, buf);
     } else {
         emit_simple_error(buf, (uint8_t*)SIMPLE_ERROR_CMD_NOT_FOUND, 13);
         return;

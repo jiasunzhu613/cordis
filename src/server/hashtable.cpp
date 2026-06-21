@@ -145,3 +145,24 @@ HashNode *hm_delete(HashMap *hmap, HashNode *key, bool (*eq)(HashNode *, HashNod
 size_t hm_size(HashMap *hmap) {
     return hmap->older.size + hmap->newer.size;
 }
+
+static void htab_foreach(HashTab *htab, bool (*callback)(HashNode *, void *arg), void *arg) {
+    // If table is NULL, just exit
+    if (htab->tab == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < htab->mask + 1; i++) {
+        HashNode *p = htab->tab[i];
+        printf("got to heres\n");
+        while (p != NULL) {
+            callback(p, arg);
+            p = p->next;
+        }
+    }
+}
+
+void hm_foreach(HashMap *hmap, bool (*callback)(HashNode *, void *arg), void *arg) {
+    htab_foreach(&hmap->older, callback, arg);
+    htab_foreach(&hmap->newer, callback, arg);
+}

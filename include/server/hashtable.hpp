@@ -40,3 +40,4 @@ void hm_insert(HashMap *hmap, HashNode *Node);
 HashNode *hm_delete(HashMap *hmap, HashNode *key, bool (*eq)(HashNode *, HashNode *));
 void hm_clear(HashMap *hmap);
 size_t hm_size(HashMap *hmap);
+void hm_foreach(HashMap *hmap, bool (*callback)(HashNode *, void *arg), void *arg); // iterates over each node in the hashmap and invokes callback on each one
