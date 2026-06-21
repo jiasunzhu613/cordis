@@ -80,7 +80,7 @@ int main() {
     };
 
     std::vector<std::string> payloads2 = {
-        "get", "a"
+        "get"
         // std::string(MAX_MSG_SIZE, 'z'), 
         // "hello3"
     };

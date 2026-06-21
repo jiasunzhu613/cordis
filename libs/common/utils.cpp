@@ -182,6 +182,7 @@ int read_simple_error(struct Buffer *buf, std::string &ptr) {
 }
 
 void read_int64(struct Buffer *buf, int64_t &ptr); // TODO
+
 int read_bulk_string(struct Buffer *buf, std::string &ptr) {
     uint32_t len;
     if (buf->size() < 4) {

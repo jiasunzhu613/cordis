@@ -22,6 +22,9 @@ add_subdirectory(src/client)
 target_link_libraries(server PUBLIC common)
 target_link_libraries(client PUBLIC common)
 
+# Explicitly install executables in separate directory
+install(TARGETS server client DESTINATION bin)
+
 # For GTests
 enable_testing()
 
