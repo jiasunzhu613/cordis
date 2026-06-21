@@ -8,15 +8,13 @@ HashMap => 2 HashTables
 
 HashTable => separate chaining fixed-sidez hashtable
 */
-#define container_of(ptr, T, member) \
-    ((T *)( (char *)ptr - offsetof(T, member) ))
 
 const size_t k_max_load_factor = 8;
 const size_t k_rehashing_constant_work = 128;
 
 // TODO: init individual hash tables
 static void htab_init(HashTab *htab, size_t size) {
-    assert(size > 0 && (size & (size - 1)) == 0); // check that size is a power of 2
+    assert((size > 0 && (size & (size - 1)) == 0) && "Hashtable size must be power of two"); // check that size is a power of 2
     htab->tab = (HashNode**) calloc(size, sizeof(HashNode*));
     htab->mask = size - 1;
     htab->size = 0; // number of nodes in htab
@@ -110,7 +108,7 @@ void hm_insert(HashMap *hmap, HashNode *node) {
     // init new table if empty
     if (!hmap->newer.tab) {
         htab_init(&hmap->newer, 4);
-    } 
+    }
 
     // insert into table
     htab_insert(&hmap->newer, node);
@@ -137,4 +135,13 @@ HashNode *hm_delete(HashMap *hmap, HashNode *key, bool (*eq)(HashNode *, HashNod
     }
 
     return NULL;
+}
+
+// TODO
+// void hm_clear(HashMap *hmap) {
+
+// }
+
+size_t hm_size(HashMap *hmap) {
+    return hmap->older.size + hmap->newer.size;
 }

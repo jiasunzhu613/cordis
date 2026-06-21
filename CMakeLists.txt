@@ -7,7 +7,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Include dependencies through FetchContent CMake module
 include(FetchContent)
-include(FetchContent)
 FetchContent_Declare(
   googletest
   URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
@@ -26,8 +25,12 @@ target_link_libraries(client PUBLIC common)
 # For GTests
 enable_testing()
 
-add_executable(hello_test tests/hello_test.cc)
-target_link_libraries(hello_test GTest::gtest_main)
+add_executable(hashtable_test tests/hashtable_test.cpp)
+target_include_directories(hashtable_test PUBLIC ${CMAKE_SOURCE_DIR}/include/server)
+target_link_libraries(hashtable_test 
+    hashtable
+    GTest::gtest_main
+)
 
 include(GoogleTest)
-gtest_discover_tests(hello_test)
+gtest_discover_tests(hashtable_test)

@@ -1,9 +1,12 @@
 #pragma once
 
-#include <assert.h>
+#include <cassert>
 #include <cstdlib>
 
-#include "utils.hpp"
+#include <common/utils.hpp>
+
+#define container_of(ptr, T, member) \
+    ((T *)( (char *)ptr - offsetof(T, member) ))
 
 // Define intrusive linkedlist data structure for separate chaining
 struct HashNode {
